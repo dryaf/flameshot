@@ -23,14 +23,22 @@ SelectionWidget::SelectionWidget(QColor c, QWidget* parent)
 {
     // prevents this widget from consuming CaptureToolButton mouse events
     setAttribute(Qt::WA_TransparentForMouseEvents);
+    // Keep the transparent overlay stationary. Moving a large child widget
+    // otherwise invalidates its entire old and new footprint in the parent.
+    QWidget::setGeometry(parent->rect());
     parent->installEventFilter(this);
 
-    m_animation = new QPropertyAnimation(this, "geometry", this);
+    m_animation = new QPropertyAnimation(this, "selectionGeometry", this);
     m_animation->setEasingCurve(QEasingCurve::InOutQuad);
     m_animation->setDuration(200);
     connect(m_animation, &QPropertyAnimation::finished, this, [this]() {
         emit geometrySettled();
     });
+    m_settleTimer.setSingleShot(true);
+    connect(&m_settleTimer,
+            &QTimer::timeout,
+            this,
+            &SelectionWidget::geometrySettled);
 
     int sideVal = GlobalValues::buttonBaseSize() * 0.6;
     int handleSide = sideVal / 2;
@@ -79,7 +87,7 @@ SelectionWidget::SideType SelectionWidget::getMouseSide(
     }
 }
 
-QVector<QRect> SelectionWidget::handlerAreas()
+QVector<QRect> SelectionWidget::handlerAreas() const
 {
     QVector<QRect> areas;
     areas << m_TLHandle << m_TRHandle << m_BLHandle << m_BRHandle << m_LHandle
@@ -131,7 +139,13 @@ void SelectionWidget::setGeometryAnimated(const QRect& r)
 
 void SelectionWidget::setGeometry(const QRect& r)
 {
-    QWidget::setGeometry(r + QMargins(MARGIN, MARGIN, MARGIN, MARGIN));
+    if (m_selectionGeometry == r) {
+        return;
+    }
+    const QRegion oldBorder = paintRegion();
+    m_selectionGeometry = r;
+    updateAreas();
+    update(oldBorder | paintRegion());
     updateCursor();
     if (isVisible()) {
         emit geometryChanged();
@@ -140,21 +154,37 @@ void SelectionWidget::setGeometry(const QRect& r)
 
 QRect SelectionWidget::geometry() const
 {
-    return QWidget::geometry() - QMargins(MARGIN, MARGIN, MARGIN, MARGIN);
+    return m_selectionGeometry;
 }
 
 QRect SelectionWidget::fullGeometry() const
 {
-    return QWidget::geometry();
+    return m_selectionGeometry + QMargins(MARGIN, MARGIN, MARGIN, MARGIN);
 }
 
 QRect SelectionWidget::rect() const
 {
-    return QWidget::rect() - QMargins(MARGIN, MARGIN, MARGIN, MARGIN);
+    return m_selectionGeometry;
+}
+
+QRegion SelectionWidget::paintRegion() const
+{
+    if (m_selectionGeometry.isEmpty()) {
+        return {};
+    }
+    // Includes antialiased handle edges without invalidating the interior.
+    const int margin = MARGIN + 2;
+    return QRegion(
+             m_selectionGeometry.adjusted(-margin, -margin, margin, margin))
+      .subtracted(
+        m_selectionGeometry.adjusted(margin, margin, -margin, -margin));
 }
 
 bool SelectionWidget::eventFilter(QObject* obj, QEvent* event)
 {
+    if (obj == parentWidget() && event->type() == QEvent::Resize) {
+        QWidget::setGeometry(parentWidget()->rect());
+    }
     if (m_ignoreMouse && dynamic_cast<QMouseEvent*>(event)) {
         m_activeSide = NO_SIDE;
         unsetCursor();
@@ -355,7 +385,7 @@ void SelectionWidget::parentMouseMoveEvent(QMouseEvent* e)
             break;
         default:
             if (m_activeSide) {
-                move(this->pos() + pos - m_dragStartPos);
+                setGeometry(geom.translated(pos - m_dragStartPos));
                 m_dragStartPos = pos;
                 /* do nothing special in case of preserveAspect */
             }
@@ -379,6 +409,9 @@ void SelectionWidget::parentMouseMoveEvent(QMouseEvent* e)
 
 void SelectionWidget::paintEvent(QPaintEvent*)
 {
+    if (m_selectionGeometry.isEmpty()) {
+        return;
+    }
     QPainter p(this);
     if (!p.isActive()) {
         return;
@@ -389,22 +422,6 @@ void SelectionWidget::paintEvent(QPaintEvent*)
     p.setBrush(m_color);
     for (auto rectangle : handlerAreas()) {
         p.drawEllipse(rectangle);
-    }
-}
-
-void SelectionWidget::resizeEvent(QResizeEvent*)
-{
-    updateAreas();
-    if (isVisible()) {
-        emit geometryChanged();
-    }
-}
-
-void SelectionWidget::moveEvent(QMoveEvent*)
-{
-    updateAreas();
-    if (isVisible()) {
-        emit geometryChanged();
     }
 }
 
@@ -421,6 +438,7 @@ void SelectionWidget::hideEvent(QHideEvent*)
 void SelectionWidget::updateColor(const QColor& c)
 {
     m_color = c;
+    update(paintRegion());
 }
 
 void SelectionWidget::moveLeft()
@@ -551,7 +569,6 @@ void SelectionWidget::updateCursor()
 
 void SelectionWidget::setGeometryByKeyboard(const QRect& r)
 {
-    static QTimer timer;
     QRect rectangle = r.intersected(parentWidget()->rect());
     if (rectangle.width() <= 0) {
         rectangle.setWidth(1);
@@ -560,10 +577,5 @@ void SelectionWidget::setGeometryByKeyboard(const QRect& r)
         rectangle.setHeight(1);
     }
     setGeometry(rectangle);
-    connect(&timer,
-            &QTimer::timeout,
-            this,
-            &SelectionWidget::geometrySettled,
-            Qt::UniqueConnection);
-    timer.start(400);
+    m_settleTimer.start(400);
 }

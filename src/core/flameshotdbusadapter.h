@@ -15,6 +15,7 @@ public:
     virtual ~FlameshotDBusAdapter();
 
 public slots:
+    bool startCapture();
     Q_NOREPLY void captureScreen();
     Q_NOREPLY void attachScreenshotToClipboard(const QByteArray& data);
     Q_NOREPLY void attachTextToClipboard(const QString& text,

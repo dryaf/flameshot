@@ -4,12 +4,20 @@
 #include "flameshotdbusadapter.h"
 #include "core/flameshot.h"
 #include "core/flameshotdaemon.h"
+#include <QTimer>
 
 FlameshotDBusAdapter::FlameshotDBusAdapter(QObject* parent)
   : QDBusAbstractAdaptor(parent)
 {}
 
 FlameshotDBusAdapter::~FlameshotDBusAdapter() = default;
+
+bool FlameshotDBusAdapter::startCapture()
+{
+    // Acknowledge promptly, before a screenshot portal can block on consent.
+    QTimer::singleShot(0, this, &FlameshotDBusAdapter::captureScreen);
+    return true;
+}
 
 void FlameshotDBusAdapter::captureScreen()
 {

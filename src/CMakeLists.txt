@@ -336,6 +336,10 @@ endif ()
 
 if (UNIX)
     # Install desktop files, completion and dbus files
+    if (NOT APPLE)
+        install(PROGRAMS ${CMAKE_SOURCE_DIR}/run-flameshot.sh
+                DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME flameshot-local)
+    endif()
     configure_file(${CMAKE_SOURCE_DIR}/data/desktopEntry/package/org.flameshot.Flameshot.desktop
             ${CMAKE_CURRENT_BINARY_DIR}/share/applications/org.flameshot.Flameshot.desktop @ONLY)
 

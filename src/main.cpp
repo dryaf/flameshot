@@ -23,6 +23,9 @@
 
 #if !(defined(Q_OS_MACOS) || defined(Q_OS_WIN))
 #include "core/flameshotdbusadapter.h"
+#if defined(Q_OS_LINUX)
+#include "core/daemonlaunch.h"
+#endif
 #include <QDBusConnection>
 #include <QDBusMessage>
 #endif
@@ -302,6 +305,11 @@ int main(int argc, char* argv[])
       "last-region",
       QObject::tr("Repeat screenshot with previously selected region"));
 
+    CommandOption daemonOption(
+      "daemon",
+      QObject::tr("Launch a plain GUI capture in the running local daemon and "
+                  "return immediately; other capture options run locally"));
+
     CommandOption regionOption("region",
                                QObject::tr("Screenshot region to select"),
                                QStringLiteral("WxH+X+Y or string"));
@@ -429,6 +437,7 @@ int main(int argc, char* argv[])
                         rawImageOption,
                         selectionOption,
                         pinOption,
+                        daemonOption,
                         acceptOnSelectOption },
                       guiArgument);
     parser.AddOptions({ screenNumberOption,
@@ -467,6 +476,23 @@ int main(int argc, char* argv[])
         flameshot->launcher();
         qApp->exec();
     } else if (parser.isSet(guiArgument)) { // GUI
+#if defined(Q_OS_LINUX)
+        if (parser.isSet(daemonOption) && qApp->arguments().size() == 3 &&
+            !ConfigHandler().allowMultipleGuiInstances()) {
+            switch (launchCaptureInDaemon()) {
+                case DaemonLaunch::Started:
+                    delete qApp;
+                    return E_OK;
+                case DaemonLaunch::Failed:
+                    AbstractLogger::error(AbstractLogger::Target::Stderr)
+                      << "Unable to confirm daemon capture request.";
+                    delete qApp;
+                    return E_DBUSCONN;
+                case DaemonLaunch::Unavailable:
+                    break;
+            }
+        }
+#endif
         reinitializeAsQApplication(argc, argv, translator, qtTranslator);
 
         // Prevent multiple instances of 'flameshot gui' from running if not
